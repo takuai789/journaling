@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Ephemeral" />
+<meta name="theme-color" content="#F2F2F7" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<!-- 埋め込みSVGファビコン（追加ファイル不要）。色と文字はアプリに合わせる。 -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23243b5a'/%3E%3Cstop offset='1' stop-color='%234a6c97'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Ctext x='32' y='34' font-family='Georgia,serif' font-size='40' font-style='italic' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='central'%3EE%3C/text%3E%3C/svg%3E" />
+<title>Ephemeral Journaling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #F2F2F7;
+    --card: #FFFFFF;
+    --ink: #1a1a1a;
+    --secondary: rgba(60,60,67,0.6);
+    --tertiary: rgba(60,60,67,0.3);
+    --sep: rgba(60,60,67,0.16);
+    --blue: #007AFF;
+    --red: #FF3B30;
+    --navy: #1f3a5f;
+    --navy-soft: #36567d;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+    color: var(--ink); font-size: 16px; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  #app {
+    height: var(--app-height, 100%);
+    display: flex; flex-direction: column;
+    padding-top: var(--safe-top);
+    transition: height 0.15s ease-out;
+  }
+  .view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .view.active { display: flex; }
+
+  /* ---- ナビバー ---- */
+  .navbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; min-height: 46px; position: relative;
+    background: rgba(242,242,247,0.92);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-bottom: 0.5px solid var(--sep); z-index: 10; flex-shrink: 0;
+  }
+  .navbar .title {
+    font-size: 16px; font-weight: 700; letter-spacing: 0.01em;
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none; white-space: nowrap;
+  }
+  .icon-btn {
+    width: 40px; min-width: 40px; height: 38px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--navy); background: none; border: 0; cursor: pointer;
+  }
+  .icon-btn.text { font-size: 15px; gap: 2px; width: auto; padding: 0 6px; }
+
+  /* ---- 入力エリア ---- */
+  .composer { flex-shrink: 0; padding: 8px 14px 4px; }
+  .composer-box {
+    background: var(--card); border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 14px 14px 10px;
+  }
+  #composer {
+    width: 100%; border: 0; outline: 0; resize: none;
+    font-family: inherit; font-size: 16px; line-height: 1.7; color: var(--ink);
+    background: transparent; max-height: 38vh; min-height: 76px;
+  }
+  #composer::placeholder { color: #b8b8be; }
+  .composer-bar { display: flex; align-items: center; margin-top: 8px; }
+  .composer-bar .count { font-size: 12px; color: var(--secondary); margin-right: auto; }
+  .btn-flush {
+    background: var(--navy); color: #fff; border: 0; cursor: pointer;
+    font-family: inherit; font-size: 15px; font-weight: 600;
+    padding: 9px 20px; border-radius: 999px;
+    display: flex; align-items: center; gap: 6px;
+    transition: background 0.2s, opacity 0.2s;
+  }
+  .btn-flush:disabled { background: #d3d6db; cursor: default; }
+
+  /* ---- タイムライン ---- */
+  .timeline { flex: 1; overflow-y: auto; padding: 6px 14px calc(20px + var(--safe-bottom)); -webkit-overflow-scrolling: touch; }
+  .swipe-wrap { position: relative; overflow: hidden; border-radius: 14px; margin-bottom: 10px; }
+  .swipe-del {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 84px;
+    background: var(--red); color: #fff; border: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-family: inherit; font-size: 14px; font-weight: 600;
+  }
+  .card {
+    position: relative; background: var(--card); border-radius: 14px;
+    padding: 13px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    touch-action: pan-y; will-change: transform;
+  }
+  .card .meta { font-size: 11px; color: var(--secondary); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .card .meta .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--navy-soft); display: inline-block; flex-shrink: 0; }
+  .card .body { font-size: 14.5px; color: var(--ink); line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+  .card.fresh { animation: rise 0.45s cubic-bezier(.22,.68,0,1); }
+  @keyframes rise { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .empty { text-align: center; color: var(--tertiary); font-size: 13.5px; line-height: 1.9; padding: 56px 30px; }
+  .fade-hint { text-align: center; font-size: 11px; color: var(--tertiary); padding: 10px 0 4px; }
+
+  /* ---- アーカイブ / 設定 共通リスト ---- */
+  .scroll { flex: 1; overflow-y: auto; padding: 6px 14px calc(20px + var(--safe-bottom)); -webkit-overflow-scrolling: touch; }
+  .note { text-align: center; font-size: 11.5px; color: var(--secondary); padding: 8px 28px 12px; line-height: 1.7; }
+  .grp-label { font-size: 12px; color: var(--secondary); font-weight: 600; margin: 14px 4px 8px; letter-spacing: 0.03em; }
+  .arch-card { background: var(--card); border-radius: 14px; padding: 12px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+  .arch-card .meta { font-size: 11px; color: var(--secondary); margin-bottom: 5px; }
+  .arch-card .body { font-size: 13.5px; color: #333; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+
+  /* ---- 設定 ---- */
+  .settings-group { background: var(--card); border-radius: 14px; overflow: hidden; margin-bottom: 18px; }
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 0.5px solid var(--sep);
+    font-size: 15px; cursor: pointer; color: var(--navy);
+  }
+  .settings-row:last-child { border-bottom: 0; }
+  .settings-row .sub { color: var(--secondary); font-size: 13px; }
+  .settings-row.static { color: var(--ink); cursor: default; }
+  .settings-head { font-size: 12px; color: var(--secondary); margin: 4px 6px 8px; letter-spacing: 0.03em; }
+
+  /* ---- 更新バナー ---- */
+  #updateBanner {
+    position: fixed; left: 12px; right: 12px;
+    bottom: calc(var(--safe-bottom) + 16px); z-index: 1000;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--navy); color: #fff; border: 0; border-radius: 14px;
+    padding: 14px 18px; font-family: inherit; font-size: 14px; font-weight: 600;
+    box-shadow: 0 8px 28px rgba(31,58,95,0.4); cursor: pointer;
+    transform: translateY(140%); transition: transform 0.35s cubic-bezier(.32,.72,0,1);
+  }
+  #updateBanner.show { transform: translateY(0); }
+  #updateBanner svg { display: block; flex-shrink: 0; }
+
+  /* ---- トースト ---- */
+  #toast {
+    position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 24px);
+    transform: translate(-50%, 20px); z-index: 1100;
+    background: rgba(20,20,20,0.92); color: #fff; font-size: 13px;
+    padding: 10px 18px; border-radius: 999px; opacity: 0;
+    transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== メイン（書く＋流れる） ===== -->
+  <div id="mainView" class="view active">
+    <div class="navbar">
+      <button class="icon-btn" id="toSettings" aria-label="設定">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <span class="title">Ephemeral Journaling</span>
+      <button class="icon-btn" id="toArchive" aria-label="アーカイブ">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+      </button>
+    </div>
+
+    <div class="composer">
+      <div class="composer-box">
+        <textarea id="composer" rows="3" placeholder="いま、頭の中にあることを そのまま…"></textarea>
+        <div class="composer-bar">
+          <span class="count" id="count"></span>
+          <button class="btn-flush" id="flushBtn" disabled>
+            流す
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <!-- ===== アーカイブ ===== -->
+  <div id="archiveView" class="view">
+    <div class="navbar">
+      <button class="icon-btn text" id="backFromArchive">
+        <svg width="11" height="18" viewBox="0 0 11 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1L2 9l7 8"/></svg>
+        <span>戻る</span>
+      </button>
+      <span class="title">アーカイブ</span>
+      <span style="width:40px;"></span>
+    </div>
+    <div class="note">流れていったものは、ここに残ります。<br>消すのは手動だけ。自動では消えません。</div>
+    <div class="scroll" id="archiveList"></div>
+  </div>
+
+  <!-- ===== 設定 ===== -->
+  <div id="settingsView" class="view">
+    <div class="navbar">
+      <button class="icon-btn text" id="backFromSettings">
+        <svg width="11" height="18" viewBox="0 0 11 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1L2 9l7 8"/></svg>
+        <span>戻る</span>
+      </button>
+      <span class="title">設定</span>
+      <span style="width:40px;"></span>
+    </div>
+    <div class="scroll">
+      <div class="settings-head">バックアップ</div>
+      <div class="settings-group">
+        <div class="settings-row" id="exportBtn"><span>書き出す（JSON）</span><span class="sub">⤓</span></div>
+        <div class="settings-row" id="importBtn"><span>取り込む（JSON）</span><span class="sub">⤒</span></div>
+      </div>
+      <div class="settings-head">このアプリについて</div>
+      <div class="settings-group">
+        <div class="settings-row static"><span>保存</span><span class="sub">この端末の中だけ</span></div>
+        <div class="settings-row static"><span>流したもの</span><span class="sub" id="statMain">―</span></div>
+        <div class="settings-row static"><span>アーカイブ</span><span class="sub" id="statArchive">―</span></div>
+        <div class="settings-row static"><span>バージョン</span><span class="sub" id="statVersion">―</span></div>
+      </div>
+      <div class="note" style="padding-top:4px;">書いたものは7日たつと、メイン画面からアーカイブへ静かに移ります。<br>端末をまたいで持ち運ぶときは、書き出し→取り込みで。</div>
+    </div>
+    <input type="file" id="importFile" accept="application/json" style="display:none;" />
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+  // ---------- DOM helper ----------
+  const $ = (s) => document.querySelector(s);
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const DAY = 24 * 60 * 60 * 1000;
+  const ARCHIVE_AFTER = 7 * DAY; // 7日でアーカイブへ
+
+  // ---------- IndexedDB ----------
+  // ※ 表示名を変えても、この内部識別子は絶対に変えない（保存データ互換のため）
+  const DB_NAME = 'ephemeral-journaling-db';
+  const DB_VERSION = 1;
+  const STORE = 'entries';
+  let _db = null;
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+      };
+      req.onsuccess = () => { _db = req.result; resolve(_db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function tx(mode = 'readonly') { return _db.transaction(STORE, mode).objectStore(STORE); }
+  function getAll() { return new Promise((res, rej) => { const r = tx().getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  function put(val) { return new Promise((res, rej) => { const r = tx('readwrite').put(val); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+  function del(id) { return new Promise((res, rej) => { const r = tx('readwrite').delete(id); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+
+  // ---------- バージョン ----------
+  // リリースのたびに、ここと sw.js の CACHE 名をセットで上げる。
+  const APP_VERSION = '1.0.0';
+
+  // ---------- State ----------
+  const state = { entries: [] };
+  async function loadAll() { state.entries = await getAll(); }
+
+  // ---------- 時間まわり ----------
+  function relTime(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60 * 1000) return 'たった今';
+    if (diff < 60 * 60 * 1000) return Math.floor(diff / 60000) + '分前';
+    if (diff < DAY) return Math.floor(diff / 3600000) + '時間前';
+    if (diff < 2 * DAY) return '昨日';
+    return Math.floor(diff / DAY) + '日前';
+  }
+  function absDate(ts) {
+    const d = new Date(ts);
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  }
+  // 経過時間でopacityを算出（新しい=1.0 → 7日で0.3）
+  function fadeOpacity(ts) {
+    const days = (Date.now() - ts) / DAY;
+    const op = 1 - (days / 7) * 0.7;
+    return Math.max(0.3, Math.min(1, op));
+  }
+
+  // ---------- メイン: タイムライン描画 ----------
+  function renderTimeline() {
+    const now = Date.now();
+    const list = state.entries
+      .filter((e) => now - e.createdAt < ARCHIVE_AFTER)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const tl = $('#timeline');
+    if (list.length === 0) {
+      tl.innerHTML = '<div class="empty">まだ何も流していません。<br>頭の中にあることを、上の欄に。</div>';
+      return;
+    }
+    tl.innerHTML = list.map((e) => cardHTML(e, fadeOpacity(e.createdAt), relTime(e.createdAt)))
+      .join('') + '<div class="fade-hint">― 7日たつと、静かにアーカイブへ ―</div>';
+    bindSwipe(tl);
+  }
+  function cardHTML(e, opacity, timeLabel) {
+    return `<div class="swipe-wrap" data-id="${e.id}">
+        <button class="swipe-del" data-del="${e.id}">削除</button>
+        <div class="card" style="opacity:${opacity};">
+          <div class="meta"><span class="dot"></span>${timeLabel}</div>
+          <div class="body">${escapeHTML(e.body)}</div>
+        </div>
+      </div>`;
+  }
+
+  // ---------- アーカイブ描画 ----------
+  function renderArchive() {
+    const now = Date.now();
+    const list = state.entries
+      .filter((e) => now - e.createdAt >= ARCHIVE_AFTER)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const box = $('#archiveList');
+    if (list.length === 0) {
+      box.innerHTML = '<div class="empty">アーカイブはまだ空です。</div>';
+      return;
+    }
+    box.innerHTML = list.map((e) => `
+      <div class="swipe-wrap" data-id="${e.id}" style="margin-bottom:10px;">
+        <button class="swipe-del" data-del="${e.id}">削除</button>
+        <div class="card arch-card">
+          <div class="meta">${absDate(e.createdAt)} · ${relTime(e.createdAt)}</div>
+          <div class="body">${escapeHTML(e.body)}</div>
+        </div>
+      </div>`).join('');
+    bindSwipe(box);
+  }
+
+  function escapeHTML(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ---------- スワイプ（左で削除を出す。Pointer Events） ----------
+  let openWrap = null;
+  function closeOpen() {
+    if (openWrap) { openWrap.querySelector('.card').style.transform = 'translateX(0)'; openWrap = null; }
+  }
+  function bindSwipe(container) {
+    container.querySelectorAll('.swipe-wrap').forEach((wrap) => {
+      const card = wrap.querySelector('.card');
+      let startX = 0, startY = 0, dx = 0, dir = null, dragging = false;
+      const WIDTH = 84;
+
+      card.addEventListener('pointerdown', (ev) => {
+        if (openWrap && openWrap !== wrap) closeOpen();
+        startX = ev.clientX; startY = ev.clientY; dx = 0; dir = null; dragging = true;
+        card.style.transition = 'none';
+      });
+      card.addEventListener('pointermove', (ev) => {
+        if (!dragging) return;
+        const mx = ev.clientX - startX, my = ev.clientY - startY;
+        if (dir === null) {
+          if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+          dir = Math.abs(mx) > Math.abs(my) ? 'h' : 'v';
+        }
+        if (dir === 'v') { dragging = false; return; } // 縦スクロールに譲る
+        ev.preventDefault();
+        const base = (openWrap === wrap) ? -WIDTH : 0;
+        dx = Math.max(-WIDTH - 20, Math.min(0, base + mx));
+        card.style.transform = `translateX(${dx}px)`;
+      });
+      function end() {
+        if (!dragging && dir !== 'h') return;
+        dragging = false;
+        card.style.transition = 'transform 0.22s cubic-bezier(.32,.72,0,1)';
+        if (dx < -WIDTH / 2) {
+          card.style.transform = `translateX(${-WIDTH}px)`; openWrap = wrap;
+        } else {
+          card.style.transform = 'translateX(0)'; if (openWrap === wrap) openWrap = null;
+        }
+      }
+      card.addEventListener('pointerup', end);
+      card.addEventListener('pointercancel', end);
+    });
+
+    container.querySelectorAll('.swipe-del').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-del');
+        openWrap = null;
+        await del(id);
+        await loadAll();
+        renderCurrent();
+        toast('削除しました');
+      });
+    });
+  }
+
+  // ---------- 流す ----------
+  async function flush() {
+    const ta = $('#composer');
+    const body = ta.value.trim();
+    if (!body) return;
+    const now = Date.now();
+    const entry = { id: uid(), body, createdAt: now, updatedAt: now };
+    await put(entry);
+    state.entries.push(entry);
+    ta.value = '';
+    autoGrow(ta);
+    updateCount();
+    renderTimeline();
+    // 直近に流したカードをふわっと出す
+    const first = $('#timeline .card');
+    if (first) first.classList.add('fresh');
+    $('#timeline').scrollTop = 0;
+    ta.blur();
+  }
+
+  // ---------- 入力欄 ----------
+  function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.38) + 'px'; }
+  function updateCount() {
+    const ta = $('#composer');
+    const n = ta.value.trim().length;
+    $('#count').textContent = n ? n + '字' : '';
+    $('#flushBtn').disabled = n === 0;
+  }
+
+  // ---------- 画面切り替え ----------
+  let currentView = 'main';
+  function showView(name) {
+    closeOpen();
+    currentView = name;
+    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+    $('#' + name + 'View').classList.add('active');
+    renderCurrent();
+  }
+  function renderCurrent() {
+    if (currentView === 'main') renderTimeline();
+    else if (currentView === 'archive') renderArchive();
+    else if (currentView === 'settings') renderSettings();
+  }
+
+  // ---------- 設定 ----------
+  function renderSettings() {
+    const now = Date.now();
+    const mainN = state.entries.filter((e) => now - e.createdAt < ARCHIVE_AFTER).length;
+    const archN = state.entries.length - mainN;
+    $('#statMain').textContent = mainN + '件';
+    $('#statArchive').textContent = archN + '件';
+    $('#statVersion').textContent = 'v' + APP_VERSION;
+  }
+
+  // ---------- JSON 書き出し / 取り込み ----------
+  const SCHEMA = 'ephemeral-journaling.v1';
+  function exportData() {
+    const data = { schema: SCHEMA, exportedAt: new Date().toISOString(), entries: state.entries };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `ephemeral-journaling-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('書き出しました');
+  }
+  async function importData(file) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (data.schema !== SCHEMA) { toast('対応していないファイルです'); return; }
+      const localById = new Map(state.entries.map((n) => [n.id, n]));
+      let added = 0;
+      for (const it of (data.entries || [])) {
+        const local = localById.get(it.id);
+        if (!local || (it.updatedAt || 0) > (local.updatedAt || 0)) { await put(it); added++; }
+      }
+      await loadAll();
+      renderCurrent();
+      toast(added ? `${added}件を取り込みました` : '新しいものはありませんでした');
+    } catch (e) { toast('読み込めませんでした'); }
+  }
+
+  // ---------- トースト ----------
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+
+  // ---------- イベント ----------
+  $('#composer').addEventListener('input', (e) => { autoGrow(e.target); updateCount(); });
+  $('#flushBtn').addEventListener('click', flush);
+  $('#toArchive').addEventListener('click', () => showView('archive'));
+  $('#backFromArchive').addEventListener('click', () => showView('main'));
+  $('#toSettings').addEventListener('click', () => showView('settings'));
+  $('#backFromSettings').addEventListener('click', () => showView('main'));
+  $('#exportBtn').addEventListener('click', exportData);
+  $('#importBtn').addEventListener('click', () => $('#importFile').click());
+  $('#importFile').addEventListener('change', (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
+
+  // ---------- 起動 ----------
+  (async function init() {
+    setupViewportTracking();
+    await openDB();
+    await loadAll();
+    showView('main');
+    updateCount();
+    // 起動即フォーカスはしない（タイムラインも見えるように）。書きたい時は欄をタップ。
+  })();
+
+  // 復帰時に再描画（相対時刻とフェードを更新、7日経過分をアーカイブへ反映）
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') renderCurrent(); });
+
+  // ---------- visualViewport（キーボード対策） ----------
+  function setupViewportTracking() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    let baseHeight = vv.height;
+    function apply() {
+      root.style.setProperty('--app-height', vv.height + 'px');
+      document.body.classList.toggle('keyboard-open', vv.height < baseHeight - 120);
+    }
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    window.addEventListener('orientationchange', () => { setTimeout(() => { baseHeight = vv.height; apply(); }, 300); });
+    apply();
+  }
+
+  // ---------- Service Worker + 自動アップデート ----------
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        const swUrl = new URL('sw.js', location.href).href;
+        const res = await fetch(swUrl, { method: 'HEAD' });
+        if (!res.ok) return;
+        const reg = await navigator.serviceWorker.register('sw.js');
+        if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBanner(sw);
+          });
+        });
+        reg.update();
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update(); });
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return; refreshing = true; window.location.reload();
+        });
+      } catch (e) {}
+    });
+  }
+  function showUpdateBanner(waitingSW) {
+    if (document.getElementById('updateBanner')) return;
+    const b = document.createElement('button');
+    b.id = 'updateBanner';
+    b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span>新しいバージョンがあります — タップで更新</span>';
+    b.addEventListener('click', () => {
+      b.disabled = true; b.querySelector('span').textContent = '更新中…';
+      waitingSW.postMessage('SKIP_WAITING');
+    });
+    document.body.appendChild(b);
+    requestAnimationFrame(() => b.classList.add('show'));
+  }
+</script>
+</body>
+</html>
