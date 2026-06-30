@@ -3,7 +3,7 @@
 // - index.html はネットワーク優先で常に最新を取りに行く（失敗時キャッシュ）
 // - アイコン等はキャッシュ優先
 // リリース時は index.html の APP_VERSION と この CACHE 名を必ずセットで上げる。
-const CACHE = 'ephemeral-journaling-v1-0-0';
+const CACHE = 'ephemeral-journaling-v1-1-0';
 const ASSETS = [
   './',
   './index.html',
